@@ -106,6 +106,9 @@ impl PartiallySignedTransaction {
                             // key has to be empty
                             if pair.key.key.is_empty() {
                                 // there can only be one unsigned transaction
+
+                                println!("PSBT check key empty");
+
                                 if tx.is_none() {
                                     let vlen: usize = pair.value.len();
                                     let mut decoder = Cursor::new(pair.value);
@@ -121,6 +124,7 @@ impl PartiallySignedTransaction {
                                     });
 
                                     if decoder.position() != vlen as u64 {
+                                        println!("Failed PSBT");
                                         return Err(encode::Error::ParseFailed("data not consumed entirely when explicitly deserializing"))
                                     }
                                 } else {

@@ -150,6 +150,7 @@ pub fn deserialize<T: Decodable>(data: &[u8]) -> Result<T, Error> {
     if consumed == data.len() {
         Ok(rv)
     } else {
+        println!("Failed deserialize");
         Err(Error::ParseFailed("data not consumed entirely when explicitly deserializing"))
     }
 }

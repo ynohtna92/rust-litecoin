@@ -1069,6 +1069,18 @@ impl Decodable for Transaction {
                         })
                     }
                 }
+                8 | 9 => {
+                    let input = Vec::<TxIn>::consensus_decode_from_finite_reader(r)?;
+                    let output = Vec::<TxOut>::consensus_decode_from_finite_reader(r)?;
+                    // println!("Segwit 8/9");
+                    // println!("{:08x} {:?} {:?}", version, input, output);
+                    Ok(Transaction {
+                        version,
+                        input,
+                        output,
+                        lock_time: Decodable::consensus_decode_from_finite_reader(r)?,
+                    })
+                }
                 // We don't support anything else
                 x => Err(encode::Error::UnsupportedSegwitFlag(x)),
             }
