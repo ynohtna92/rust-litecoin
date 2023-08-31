@@ -81,6 +81,8 @@ pub enum Error {
     InvalidWitnessProgramLength(usize),
     /// A v0 witness program must be either of length 20 or 32.
     InvalidSegwitV0ProgramLength(usize),
+    /// A mweb address must be of length 66.
+    InvalidStealthAddressLength(usize),
     /// An uncompressed pubkey was used where it is not allowed.
     UncompressedPubkey,
     /// Address size more than 520 bytes is not allowed.
@@ -112,6 +114,7 @@ impl fmt::Display for Error {
             Error::MalformedWitnessVersion => f.write_str("bitcoin script opcode does not match any known witness version, the script is malformed"),
             Error::InvalidWitnessProgramLength(l) => write!(f, "the witness program must be between 2 and 40 bytes in length: length={}", l),
             Error::InvalidSegwitV0ProgramLength(l) => write!(f, "a v0 witness program must be either of length 20 or 32 bytes: length={}", l),
+            Error::InvalidStealthAddressLength(l) => write!(f, "a mweb address must be of length 66. length={}", l),
             Error::UncompressedPubkey => write!(f, "an uncompressed pubkey was used where it is not allowed"),
             Error::ExcessiveScriptSize => write!(f, "script size exceed 520 bytes"),
             Error::UnrecognizedScript => write!(f, "script is not a p2pkh, p2sh or witness program"),
@@ -141,6 +144,7 @@ impl std::error::Error for Error {
             | MalformedWitnessVersion
             | InvalidWitnessProgramLength(_)
             | InvalidSegwitV0ProgramLength(_)
+            | InvalidStealthAddressLength(_)
             | UncompressedPubkey
             | ExcessiveScriptSize
             | UnrecognizedScript
@@ -174,6 +178,8 @@ pub enum AddressType {
     P2wsh,
     /// Pay to taproot.
     P2tr,
+    /// Mimblewimble
+    Mweb,
 }
 
 impl fmt::Display for AddressType {
@@ -184,6 +190,7 @@ impl fmt::Display for AddressType {
             AddressType::P2wpkh => "p2wpkh",
             AddressType::P2wsh => "p2wsh",
             AddressType::P2tr => "p2tr",
+            AddressType::Mweb => "mweb",
         })
     }
 }
@@ -197,6 +204,7 @@ impl FromStr for AddressType {
             "p2wpkh" => Ok(AddressType::P2wpkh),
             "p2wsh" => Ok(AddressType::P2wsh),
             "p2tr" => Ok(AddressType::P2tr),
+            "mweb" => Ok(AddressType::Mweb),
             _ => Err(Error::UnknownAddressType(s.to_owned())),
         }
     }
@@ -401,6 +409,11 @@ pub enum Payload {
     ScriptHash(ScriptHash),
     /// Segwit address.
     WitnessProgram(WitnessProgram),
+    /// MWEB address.
+    StealthAddress {
+        /// PublicKey Scan (33 bytes) and PublicKey Spend (33 bytes)
+        publickey_hashes: Vec<u8>,
+    },
 }
 
 /// Witness program as defined in BIP141.
@@ -468,6 +481,9 @@ impl Payload {
             Payload::PubkeyHash(ref hash) => ScriptBuf::new_p2pkh(hash),
             Payload::ScriptHash(ref hash) => ScriptBuf::new_p2sh(hash),
             Payload::WitnessProgram(ref prog) => ScriptBuf::new_witness_program(prog),
+            Payload::StealthAddress { publickey_hashes: ref _publickey_hashes } => {
+                ScriptBuf::new()
+            }
         }
     }
 
@@ -482,6 +498,7 @@ impl Payload {
             Payload::WitnessProgram(ref prog) if script.is_witness_program() =>
                 &script.as_bytes()[2..] == prog.program.as_bytes(),
             Payload::PubkeyHash(_) | Payload::ScriptHash(_) | Payload::WitnessProgram(_) => false,
+            Payload::StealthAddress { .. } => false,
         }
     }
 
@@ -558,6 +575,7 @@ impl Payload {
             Payload::ScriptHash(hash) => hash.as_ref(),
             Payload::PubkeyHash(hash) => hash.as_ref(),
             Payload::WitnessProgram(prog) => prog.program().as_bytes(),
+            Payload::StealthAddress { publickey_hashes } => publickey_hashes,
         }
     }
 }
@@ -573,6 +591,8 @@ pub struct AddressEncoding<'a> {
     pub p2sh_prefix: u8,
     /// hrp used in bech32 addresss (e.g. "bc" for "bc1..." addresses).
     pub bech32_hrp: &'a str,
+    /// hrp used in bech32 mweb stealth addresses (e.g "ltcmweb" for "ltcmweb..." addresses).
+    pub mweb_hrp: &'a str,
 }
 
 /// Formats bech32 as upper case if alternate formatting is chosen (`{:#}`).
@@ -604,6 +624,18 @@ impl<'a> fmt::Display for AddressEncoding<'a> {
                     bech32::Bech32Writer::new(self.bech32_hrp, version.bech32_variant(), writer)?;
                 bech32::WriteBase32::write_u5(&mut bech32_writer, version.into())?;
                 bech32::ToBase32::write_base32(&prog.as_bytes(), &mut bech32_writer)
+            }
+            Payload::StealthAddress { publickey_hashes } => {
+                let mut upper_writer;
+                let writer = if fmt.alternate() {
+                    upper_writer = UpperWriter(fmt);
+                    &mut upper_writer as &mut dyn fmt::Write
+                } else {
+                    fmt as &mut dyn fmt::Write
+                };
+                let mut bech32_writer =
+                    bech32::Bech32Writer::new(self.mweb_hrp, bech32::Variant::Bech32, writer)?;
+                bech32::ToBase32::write_base32(&publickey_hashes, &mut bech32_writer)
             }
         }
     }
@@ -726,6 +758,8 @@ impl NetworkValidation for NetworkUnchecked {
 /// * [BIP142 - Address Format for Segregated Witness](https://github.com/bitcoin/bips/blob/master/bip-0142.mediawiki)
 /// * [BIP341 - Taproot: SegWit version 1 spending rules](https://github.com/bitcoin/bips/blob/master/bip-0341.mediawiki)
 /// * [BIP350 - Bech32m format for v1+ witness addresses](https://github.com/bitcoin/bips/blob/master/bip-0350.mediawiki)
+/// * [LIP3 - MimbleWimble via Extension Blocks](https://github.com/litecoin-project/lips/blob/master/lip-0003.mediawiki)
+/// * [StealthAddresses - Bech32 address format for mbweb stealth addresses](https://github.com/ltc-mweb/litecoin/blob/0.21/doc/mweb/stealth_addresses.md)
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Address<V = NetworkChecked>
 where
@@ -792,6 +826,7 @@ impl<V: NetworkValidation> Address<V> {
                     _ => None,
                 }
             }
+            Payload::StealthAddress { publickey_hashes: ref _publickey_hashes } => Some(AddressType::Mweb)
         }
     }
 
@@ -810,8 +845,11 @@ impl<V: NetworkValidation> Address<V> {
             Network::Testnet | Network::Signet => "tb",
             Network::Regtest => "bcrt",
         };
+        let mweb_hrp = match self.network {
+            Network::Bitcoin | Network::Testnet | Network::Signet | Network::Regtest => "ltcmweb",
+        };
         let encoding =
-            AddressEncoding { payload: &self.payload, p2pkh_prefix, p2sh_prefix, bech32_hrp };
+            AddressEncoding { payload: &self.payload, p2pkh_prefix, p2sh_prefix, bech32_hrp, mweb_hrp };
 
         use fmt::Display;
 
@@ -1139,6 +1177,42 @@ impl FromStr for Address<NetworkUnchecked> {
             return Ok(Address::new(network, Payload::WitnessProgram(witness_program)));
         }
 
+        let mweb_bech32_network = match find_bech32_prefix(s) {
+            "ltcmweb" | "LTCMWEB" => Some(Network::Bitcoin),
+            _ => None,
+        };
+        if let Some(network) = mweb_bech32_network {
+            // decode mweb address as bech32
+            let (_, payload, _v) = bech32::decode(s)?;
+            if payload.is_empty() {
+                return Err(Error::EmptyBech32Payload);
+            }
+
+            let (_version, data) = payload.split_at(1);
+
+            let converted: Vec<u8> = match bech32::FromBase32::from_base32(&data) {
+                Ok(data) => data,
+                Err(error) => panic!("Problem with converting: {:?}", error),
+            };
+
+            if converted.len() != 66 {
+                return Err(Error::InvalidStealthAddressLength(converted.len()));
+            }
+
+            // Get the script version and program (converted from 5-bit to 8-bit)
+            let (_scan, _spend) = {
+                let half = converted.len() / 2;
+                let (scan, spend) = converted.split_at(half);
+                (scan, spend)
+            };
+
+            return Ok(Address::new(
+                network,
+        Payload::StealthAddress {
+                    publickey_hashes: converted.to_vec()
+                }));
+        }
+
         // Base58
         if s.len() > 50 {
             return Err(Error::Base58(base58::Error::InvalidLength(s.len() * 11 / 15)));
@@ -1377,6 +1451,7 @@ mod tests {
             ("bc1pw508d6qejxtdg4y5r3zarvary0c5xw7kw508d6qejxtdg4y5r3zarvary0c5xw7kt5nd6y", None),
             // segwit v2
             ("bc1zw508d6qejxtdg4y5r3zarvaryvaxxpcs", None),
+            ("ltcmweb1qqvc0wyuk2r39ed482htlt5zxcqfzkqps0eev3rlejnrem0n79z2jzq5lhlv79ffu4c3v4au9z3ewks8raaz9f8t04634akevlwfdgkmkkq2cvvue", Some(AddressType::Mweb))
         ];
         for (address, expected_type) in &addresses {
             let addr = Address::from_str(address)
