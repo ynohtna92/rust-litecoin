@@ -14,6 +14,7 @@
     <a href="https://docs.rs/bitcoin"><img alt="API Docs" src="https://img.shields.io/badge/docs.rs-bitcoin-green"/></a>
     <a href="https://blog.rust-lang.org/2020/02/27/Rust-1.41.1.html"><img alt="Rustc Version 1.41.1+" src="https://img.shields.io/badge/rustc-1.41.1%2B-lightgrey.svg"/></a>
     <a href="https://gnusha.org/bitcoin-rust/"><img alt="Chat on IRC" src="https://img.shields.io/badge/irc-%23bitcoin--rust%20on%20libera.chat-blue"></a>
+    <a href="https://github.com/model-checking/kani"><imp alt="kani" src="https://github.com/rust-bitcoin/rust-bitcoin/actions/workflows/kani.yaml/badge.svg"></a>
     <img alt="Lines of code" src="https://img.shields.io/tokei/lines/github/rust-bitcoin/rust-bitcoin">
   </p>
 </div>
@@ -78,6 +79,12 @@ For more information please see `./CONTRIBUTING.md`.
 This library should always compile with any combination of features (minus
 `no-std`) on **Rust 1.41.1** or **Rust 1.47** with `no-std`.
 
+To build with the MSRV you will need to pin some dependencies (also for `no-std`):
+```
+cargo update -p serde --precise 1.0.156
+cargo update -p syn --precise 1.0.107
+```
+
 ## Installing Rust
 
 Rust can be installed using your package manager of choice or
@@ -88,6 +95,10 @@ Generally this isn't a problem for `rust-bitcoin` since we support much older
 versions than the current stable one (see MSRV section).
 
 ## Building
+
+The cargo feature `std` is enabled by default. At least one of the features `std` or `no-std` or both must be enabled.
+
+Enabling the `no-std` feature does not disable `std`. To disable the `std` feature you must disable default features. The `no-std` feature only enables additional features required for this crate to be usable without `std`. Both can be enabled without conflict.
 
 The library can be built and tested using [`cargo`](https://github.com/rust-lang/cargo/):
 
@@ -114,10 +125,38 @@ shell alias to check your documentation changes build correctly.
 alias build-docs='RUSTDOCFLAGS="--cfg docsrs" cargo +nightly rustdoc --features="$FEATURES" -- -D rustdoc::broken-intra-doc-links'
 ```
 
-### Running benchmarks
+## Testing
+
+Unit and integration tests are available for those interested, along with benchmarks. For project
+developers, especially new contributors looking for something to work on, we do:
+
+- Fuzz testing with [`Hongfuzz`](https://github.com/rust-fuzz/honggfuzz-rs)
+- Mutation testing with [`Mutagen`](https://github.com/llogiq/mutagen)
+- Code verification with [`Kani`](https://github.com/model-checking/kani)
+
+There are always more tests to write and more bugs to find, contributions to our testing efforts
+extremely welcomed. Please consider testing code a first class citizen, we definitely do take PRs
+improving and cleaning up test code.
+
+### Unit/Integration tests
+
+Run as for any other Rust project `cargo test --all-features`.
+
+### Benchmarks
 
 We use a custom Rust compiler configuration conditional to guard the bench mark code. To run the
 bench marks use: `RUSTFLAGS='--cfg=bench' cargo +nightly bench`.
+
+### Mutation tests
+
+We have started doing mutation testing with [mutagen](https://github.com/llogiq/mutagen). To run
+these tests first install the latest dev version with `cargo +nightly install --git https://github.com/llogiq/mutagen`
+then run with `RUSTFLAGS='--cfg=mutate' cargo +nightly mutagen`.
+
+### Code verification
+
+We have started using [kani](https://github.com/model-checking/kani), install with `cargo install
+--locked kani-verifier` (no need to run `cargo kani setup`). Run the tests with `cargo kani`.
 
 ## Pull Requests
 
